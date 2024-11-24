@@ -120,7 +120,9 @@ void Work() {
 
         int res = HardWork(a, b);
 
-        snprintf(buffer, BUF_SIZE, "%d %d", range_id, res);
+        printf("Hard work res: %d\n", res);
+
+        snprintf(buffer, BUF_SIZE, "%d %d\n", range_id, res);
 
         while (write(connfd, buffer, strlen(buffer)) < 0) {
         }
