@@ -76,8 +76,6 @@ void Run(int workers_count, int* workers, int* is_alive) {
     while (1) {
         scanf("%d %d", &start, &end);
 
-        ++end;
-
         int socks[MAX_WORKERS] = {0};
 
         struct sockaddr_in servaddr;
@@ -114,7 +112,7 @@ void Run(int workers_count, int* workers, int* is_alive) {
                 if (i == workers_count - 1) {
                     ranges[i] = end;
                 } else {
-                    ranges[i] = (last + (rand() % end)) % end;
+                    ranges[i] = (last + (rand() % (end + 1))) % (end + 1);
                 }
 
                 snprintf(buffer, BUF_SIZE, "%d %d %d", i, last, ranges[i]);
@@ -170,7 +168,7 @@ void Run(int workers_count, int* workers, int* is_alive) {
             close(socks[i]);
         }
 
-        printf("Result of integral: %d", result);
+        printf("Result of integral: %d\n", result);
     }
 }
 
