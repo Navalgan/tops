@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: task2
+  title: task3
   contact:
     name: Nikita
     email: neazhazha@edu.hse.ru
@@ -56,22 +56,17 @@ paths:
           description: error
         "404":
           description: key not found
-  /update/{resourceID}:
-    post:
+  /delete{resourceID}:
+    delete:
       tags:
-        - user
-      operationId: update
+        - test
+      operationId: delete
       parameters:
         - in: path
           name: resourceID
           schema:
             type: integer
           required: true
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/VRequest'
       responses:
         "200":
           description: ok
@@ -79,7 +74,7 @@ paths:
           description: error
         "404":
           description: key not found
-  /delete{resourceID}:
+  /invisible{resourceID}:
     delete:
       tags:
         - user

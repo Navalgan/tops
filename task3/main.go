@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/spf13/pflag"
@@ -85,6 +86,32 @@ func NewNode(nodeID, nodesCount int) *Node {
 	}
 
 	return &node
+}
+
+func (n *Node) GetStates() {
+	i := 0
+	for {
+		if i != *nodeID {
+			resp, err := http.Get(n.nodes[i] + "/state")
+			if err != nil {
+				continue
+			}
+			defer resp.Body.Close()
+
+			var state NodeState
+			err = json.NewDecoder(resp.Body).Decode(&state)
+			if err != nil {
+				continue
+			}
+
+			n.mutex.Lock()
+			n.Conflict(state.NodeID, state.Data)
+			n.mutex.Unlock()
+		}
+		time.Sleep(3 * time.Second)
+
+		i = (i + 1) % *nodesCount
+	}
 }
 
 func (n *Node) Conflict(replicaID int, data map[int]Pair) {
@@ -299,6 +326,10 @@ func main() {
 	// internal
 	server.HandleFunc("/state", node.State)
 	server.HandleFunc("/replication", node.Replication)
+
+	go func() {
+		node.GetStates()
+	}()
 
 	// external
 	server.HandleFunc("/patch", node.Patch)
