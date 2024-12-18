@@ -45,22 +45,25 @@ type Pair struct {
 type Node struct {
 	selfID int
 
-	nodes []string
-	data  map[int]Pair
-	mutex sync.RWMutex
+	nodes     []string
+	invisible map[int]bool // for conflict testing
+	data      map[int]Pair
+	mutex     sync.RWMutex
 }
 
 func NewNode(nodeID, nodesCount int) *Node {
 	nodes := make([]string, nodesCount)
-
+	invisible := make(map[int]bool)
 	for i := 0; i < nodesCount; i++ {
 		nodes[i] = fmt.Sprintf("http://localhost:%d", 8080+i)
+		invisible[i] = false
 	}
 
 	node := Node{
-		selfID: nodeID,
-		nodes:  nodes,
-		data:   make(map[int]Pair),
+		selfID:    nodeID,
+		invisible: invisible,
+		nodes:     nodes,
+		data:      make(map[int]Pair),
 	}
 
 	for i := 0; i < nodesCount; i++ {
@@ -120,7 +123,7 @@ func (n *Node) Patch(w http.ResponseWriter, r *http.Request) {
 	for quorumCount < *nodesCount && retryCount < MaxRetryCount {
 		retryCount++
 		for i := 0; i < *nodesCount; i++ {
-			if i != n.selfID {
+			if i != n.selfID && !n.invisible[i] {
 				if !isReplicated[i] {
 					replica, _ := json.Marshal(NodeState{NodeID: n.selfID, Data: n.data})
 
@@ -213,7 +216,7 @@ func (n *Node) Delete(w http.ResponseWriter, r *http.Request) {
 	for quorumCount < *nodesCount && retryCount < MaxRetryCount {
 		retryCount++
 		for i := 0; i < *nodesCount; i++ {
-			if i != n.selfID {
+			if i != n.selfID && !n.invisible[i] {
 				if !isReplicated[i] {
 					replica, _ := json.Marshal(NodeState{NodeID: n.selfID, Data: n.data})
 
@@ -261,6 +264,31 @@ func (n *Node) Replication(w http.ResponseWriter, r *http.Request) {
 	n.Conflict(replica.NodeID, replica.Data)
 }
 
+func (n *Node) Invisible(w http.ResponseWriter, r *http.Request) {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
+	vars := mux.Vars(r)
+	resourceID, ok := vars["resourceID"]
+	if !ok {
+		http.Error(w, "add resourceID", http.StatusBadRequest)
+		return
+	}
+
+	key, err := strconv.Atoi(resourceID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	v, _ := n.invisible[key]
+	if v {
+		n.invisible[key] = false
+	} else {
+		n.invisible[key] = true
+	}
+}
+
 func main() {
 	pflag.Parse()
 
@@ -276,6 +304,9 @@ func main() {
 	server.HandleFunc("/patch", node.Patch)
 	server.HandleFunc("/read/{resourceID}", node.Read)
 	server.HandleFunc("/delete/{resourceID}", node.Delete)
+
+	// testing
+	server.HandleFunc("/invisible/{resourceID}", node.Invisible)
 
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", 8080+(*nodeID)), server))
 }
