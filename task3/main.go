@@ -91,7 +91,18 @@ func NewNode(nodeID, nodesCount int) *Node {
 func (n *Node) GetStates() {
 	i := 0
 	for {
-		if i != *nodeID {
+		time.Sleep(3 * time.Second)
+		i = (i + 1) % *nodesCount
+
+		n.mutex.RLock()
+		isInvisible := n.invisible[i]
+		n.mutex.RUnlock()
+
+		if i != *nodeID && !isInvisible {
+			n.mutex.Lock()
+			fmt.Printf("Get %d state\n", i)
+			n.mutex.Unlock()
+
 			resp, err := http.Get(n.nodes[i] + "/state")
 			if err != nil {
 				continue
@@ -108,9 +119,6 @@ func (n *Node) GetStates() {
 			n.Conflict(state.NodeID, state.Data)
 			n.mutex.Unlock()
 		}
-		time.Sleep(3 * time.Second)
-
-		i = (i + 1) % *nodesCount
 	}
 }
 
@@ -314,6 +322,8 @@ func (n *Node) Invisible(w http.ResponseWriter, r *http.Request) {
 	} else {
 		n.invisible[key] = true
 	}
+
+	fmt.Printf("Node %d is invisible: %d\n", key, n.invisible[key])
 }
 
 func main() {
