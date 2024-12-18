@@ -1,0 +1,119 @@
+openapi: 3.0.3
+info:
+  title: task2
+  contact:
+    name: Nikita
+    email: neazhazha@edu.hse.ru
+  version: "1.0"
+servers:
+  - url: http://localhost:8080
+    description: node 1
+  - url: http://localhost:8081
+    description: node 2
+  - url: http://localhost:8082
+    description: node 3
+  - url: http://localhost:8083
+    description: node 4
+  - url: http://localhost:8084
+    description: node 5
+  - url: http://localhost:8085
+    description: node 6
+paths:
+  /create:
+    put:
+      tags:
+        - user
+      operationId: create
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KVRequest'
+      responses:
+        "200":
+          description: ok
+        "400":
+          description: error
+  /read/{resourceID}:
+    get:
+      tags:
+        - user
+      operationId: read
+      parameters:
+        - in: path
+          name: resourceID
+          schema:
+            type: integer
+          required: true
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VResponse'
+        "400":
+          description: error
+        "404":
+          description: key not found
+  /update:
+    post:
+      tags:
+        - user
+      operationId: update
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KVRequest'
+      responses:
+        "200":
+          description: ok
+        "400":
+          description: error
+        "404":
+          description: key not found
+  /delete/{resourceID}:
+    delete:
+      tags:
+        - user
+      operationId: delete
+      parameters:
+        - in: path
+          name: resourceID
+          schema:
+            type: integer
+          required: true
+      responses:
+        "200":
+          description: ok
+        "400":
+          description: error
+        "404":
+          description: key not found
+components:
+  schemas:
+    KVRequest:
+      title: KVRequest
+      type: object
+      properties:
+        key:
+          type: integer
+          example: 228
+        value:
+          type: integer
+          example: 1337
+    KRequest:
+      title: KRequest
+      type: object
+      properties:
+        key:
+          type: integer
+          example: 228
+    VResponse:
+      title: VResponse
+      type: object
+      properties:
+        value:
+          type: integer
+          example: 1337

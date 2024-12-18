@@ -261,7 +261,7 @@ func (n *Node) Create(w http.ResponseWriter, r *http.Request) {
 
 	retryCount := 0
 	var replicaBody *bytes.Reader
-	for quorumCount < *nodesCount/2 || retryCount < MaxRetryCount {
+	for quorumCount < *nodesCount/2 && retryCount < MaxRetryCount {
 		retryCount++
 		for i := 0; i < *nodesCount; i++ {
 			if i != n.selfID {
@@ -378,7 +378,7 @@ func (n *Node) Update(w http.ResponseWriter, r *http.Request) {
 
 	retryCount := 0
 	var replicaBody *bytes.Reader
-	for quorumCount < *nodesCount/2 || retryCount < MaxRetryCount {
+	for quorumCount < *nodesCount/2 && retryCount < MaxRetryCount {
 		retryCount++
 		for i := 0; i < *nodesCount; i++ {
 			if i != n.selfID {
@@ -455,7 +455,7 @@ func (n *Node) Delete(w http.ResponseWriter, r *http.Request) {
 
 	retryCount := 0
 	var replicaBody *bytes.Reader
-	for quorumCount < *nodesCount/2 || retryCount < MaxRetryCount {
+	for quorumCount < *nodesCount/2 && retryCount < MaxRetryCount {
 		retryCount++
 		for i := 0; i < *nodesCount; i++ {
 			if i != n.selfID {
