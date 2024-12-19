@@ -29,6 +29,13 @@ type NodeState struct {
 	Data   map[int]Pair `json:"data"`
 }
 
+type ReplicationState struct {
+	NodeID    int `json:"node_id"`
+	Timestamp int `json:"timestamp"`
+	Key       int `json:"key"`
+	Value     int `json:"value"`
+}
+
 type Request struct {
 	Key   int `json:"key"`
 	Value int `json:"value"`
@@ -49,21 +56,25 @@ type Node struct {
 	nodes     []string
 	invisible map[int]bool // for conflict testing
 	data      map[int]Pair
+	retryData map[int][]ReplicationState
 	mutex     sync.RWMutex
 }
 
 func NewNode(nodeID, nodesCount int) *Node {
 	nodes := make([]string, nodesCount)
 	invisible := make(map[int]bool)
+	retryData := make(map[int][]ReplicationState)
 	for i := 0; i < nodesCount; i++ {
 		nodes[i] = fmt.Sprintf("http://localhost:%d", 8080+i)
 		invisible[i] = false
+		retryData[i] = make([]ReplicationState, 0)
 	}
 
 	node := Node{
 		selfID:    nodeID,
 		invisible: invisible,
 		nodes:     nodes,
+		retryData: retryData,
 		data:      make(map[int]Pair),
 	}
 
@@ -81,7 +92,7 @@ func NewNode(nodeID, nodesCount int) *Node {
 				continue
 			}
 
-			node.Conflict(state.NodeID, state.Data)
+			node.ConflictState(state.NodeID, state.Data)
 		}
 	}
 
@@ -89,40 +100,35 @@ func NewNode(nodeID, nodesCount int) *Node {
 }
 
 func (n *Node) GetStates() {
-	i := 0
 	for {
 		time.Sleep(3 * time.Second)
-		i = (i + 1) % *nodesCount
 
-		n.mutex.RLock()
-		isInvisible := n.invisible[i]
-		n.mutex.RUnlock()
+		n.mutex.Lock()
+		for i := 0; i < *nodesCount; i++ {
+			if i != *nodeID && !n.invisible[i] && len(n.retryData[i]) > 0 {
+				fmt.Printf("Try resend patches to %d replica\n", i)
 
-		if i != *nodeID && !isInvisible {
-			n.mutex.Lock()
-			fmt.Printf("Get %d state\n", i)
-			n.mutex.Unlock()
+				patches, _ := json.Marshal(n.retryData[i])
 
-			resp, err := http.Get(n.nodes[i] + "/state")
-			if err != nil {
-				continue
+				patchesBody := bytes.NewReader(patches)
+
+				resp, err := http.Post(n.nodes[i]+"/replication", "application/json", patchesBody)
+				if err != nil {
+					continue
+				}
+				resp.Body.Close()
+
+				if resp.StatusCode == http.StatusOK {
+					fmt.Printf("Ack from %d replica\n", i)
+					n.retryData[i] = make([]ReplicationState, 0)
+				}
 			}
-			defer resp.Body.Close()
-
-			var state NodeState
-			err = json.NewDecoder(resp.Body).Decode(&state)
-			if err != nil {
-				continue
-			}
-
-			n.mutex.Lock()
-			n.Conflict(state.NodeID, state.Data)
-			n.mutex.Unlock()
 		}
+		n.mutex.Unlock()
 	}
 }
 
-func (n *Node) Conflict(replicaID int, data map[int]Pair) {
+func (n *Node) ConflictState(replicaID int, data map[int]Pair) {
 	for k, v := range data {
 		pair, ok := n.data[k]
 		if !ok || pair.Timestamp < v.Timestamp || (pair.Timestamp == v.Timestamp && replicaID < n.selfID) {
@@ -131,26 +137,16 @@ func (n *Node) Conflict(replicaID int, data map[int]Pair) {
 	}
 }
 
-func (n *Node) Patch(w http.ResponseWriter, r *http.Request) {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
-
-	var requests []Request
-	err := json.NewDecoder(r.Body).Decode(&requests)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	for i := 0; i < len(requests); i++ {
-		pair, ok := n.data[requests[i].Key]
-		timestamp := 1
-		if ok {
-			timestamp += pair.Timestamp
+func (n *Node) ConflictReplication(states []ReplicationState) {
+	for i := 0; i < len(states); i++ {
+		pair, ok := n.data[states[i].Key]
+		if !ok || pair.Timestamp < states[i].Timestamp || (pair.Timestamp == states[i].Timestamp && states[i].NodeID < n.selfID) {
+			n.data[states[i].Key] = Pair{states[i].Timestamp, states[i].Value}
 		}
-		n.data[requests[i].Key] = Pair{timestamp, requests[i].Value}
 	}
+}
 
+func (n *Node) Broadcast(msg []ReplicationState) {
 	quorumCount, retryCount := 1, 0
 	isReplicated := make([]bool, *nodesCount)
 
@@ -160,7 +156,7 @@ func (n *Node) Patch(w http.ResponseWriter, r *http.Request) {
 		for i := 0; i < *nodesCount; i++ {
 			if i != n.selfID && !n.invisible[i] {
 				if !isReplicated[i] {
-					replica, _ := json.Marshal(NodeState{NodeID: n.selfID, Data: n.data})
+					replica, _ := json.Marshal(msg)
 
 					replicaBody = bytes.NewReader(replica)
 
@@ -178,6 +174,37 @@ func (n *Node) Patch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	for i := 0; i < *nodesCount; i++ {
+		if !isReplicated[i] {
+			n.retryData[i] = append(n.retryData[i], msg...)
+		}
+	}
+}
+
+func (n *Node) Patch(w http.ResponseWriter, r *http.Request) {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
+	var requests []Request
+	err := json.NewDecoder(r.Body).Decode(&requests)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	patches := make([]ReplicationState, len(requests))
+	for i := 0; i < len(requests); i++ {
+		pair, ok := n.data[requests[i].Key]
+		timestamp := 1
+		if ok {
+			timestamp += pair.Timestamp
+		}
+		n.data[requests[i].Key] = Pair{timestamp, requests[i].Value}
+		patches[i] = ReplicationState{NodeID: n.selfID, Timestamp: timestamp, Key: requests[i].Key, Value: requests[i].Value}
+	}
+
+	n.Broadcast(patches)
 }
 
 func (n *Node) Read(w http.ResponseWriter, r *http.Request) {
@@ -244,33 +271,7 @@ func (n *Node) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quorumCount, retryCount := 1, 0
-	isReplicated := make([]bool, *nodesCount)
-
-	var replicaBody *bytes.Reader
-	for quorumCount < *nodesCount && retryCount < MaxRetryCount {
-		retryCount++
-		for i := 0; i < *nodesCount; i++ {
-			if i != n.selfID && !n.invisible[i] {
-				if !isReplicated[i] {
-					replica, _ := json.Marshal(NodeState{NodeID: n.selfID, Data: n.data})
-
-					replicaBody = bytes.NewReader(replica)
-
-					resp, err := http.Post(n.nodes[i]+"/replication", "application/json", replicaBody)
-					if err != nil {
-						continue
-					}
-					defer resp.Body.Close()
-
-					if resp.StatusCode == http.StatusOK {
-						isReplicated[i] = true
-						quorumCount++
-					}
-				}
-			}
-		}
-	}
+	n.Broadcast([]ReplicationState{{NodeID: n.selfID, Timestamp: pair.Timestamp + 1, Key: key, Value: DeletedValue}})
 }
 
 func (n *Node) State(w http.ResponseWriter, r *http.Request) {
@@ -289,14 +290,14 @@ func (n *Node) Replication(w http.ResponseWriter, r *http.Request) {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 
-	var replica NodeState
-	err := json.NewDecoder(r.Body).Decode(&replica)
+	var patches []ReplicationState
+	err := json.NewDecoder(r.Body).Decode(&patches)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	n.Conflict(replica.NodeID, replica.Data)
+	n.ConflictReplication(patches)
 }
 
 func (n *Node) Invisible(w http.ResponseWriter, r *http.Request) {
